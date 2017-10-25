@@ -19,35 +19,36 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-var common = require('../common');
-var assert = require('assert');
-var events = require('events');
+'use strict';
+const common = require('../common');
+const events = require('events');
+const e = new events.EventEmitter();
 
-var gotEvent = false;
-
-process.on('exit', function() {
-  assert(gotEvent);
-});
-
-var e = new events.EventEmitter();
-
-e.on('maxListeners', function() {
-  gotEvent = true;
-});
+e.on('maxListeners', common.mustCall());
 
 // Should not corrupt the 'maxListeners' queue.
 e.setMaxListeners(42);
 
-assert.throws(function() {
-  e.setMaxListeners(NaN);
-});
+const throwsObjs = [NaN, -1, 'and even this'];
 
-assert.throws(function() {
-  e.setMaxListeners(-1);
-});
+for (const obj of throwsObjs) {
+  common.expectsError(
+    () => e.setMaxListeners(obj),
+    {
+      code: 'ERR_OUT_OF_RANGE',
+      type: TypeError,
+      message: 'The "n" argument is out of range'
+    }
+  );
 
-assert.throws(function() {
-  e.setMaxListeners("and even this");
-});
+  common.expectsError(
+    () => events.defaultMaxListeners = obj,
+    {
+      code: 'ERR_OUT_OF_RANGE',
+      type: TypeError,
+      message: 'The "defaultMaxListeners" argument is out of range'
+    }
+  );
+}
 
 e.emit('maxListeners');

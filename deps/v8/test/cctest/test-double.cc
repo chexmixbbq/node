@@ -34,9 +34,8 @@
 #include "src/double.h"
 #include "test/cctest/cctest.h"
 
-
-using namespace v8::internal;
-
+namespace v8 {
+namespace internal {
 
 TEST(Uint64Conversions) {
   // Start by checking the byte-order.
@@ -105,7 +104,7 @@ TEST(IsDenormal) {
 TEST(IsSpecial) {
   CHECK(Double(V8_INFINITY).IsSpecial());
   CHECK(Double(-V8_INFINITY).IsSpecial());
-  CHECK(Double(v8::base::OS::nan_value()).IsSpecial());
+  CHECK(Double(std::numeric_limits<double>::quiet_NaN()).IsSpecial());
   uint64_t bits = V8_2PART_UINT64_C(0xFFF12345, 00000000);
   CHECK(Double(bits).IsSpecial());
   // Denormals are not special:
@@ -128,7 +127,7 @@ TEST(IsSpecial) {
 TEST(IsInfinite) {
   CHECK(Double(V8_INFINITY).IsInfinite());
   CHECK(Double(-V8_INFINITY).IsInfinite());
-  CHECK(!Double(v8::base::OS::nan_value()).IsInfinite());
+  CHECK(!Double(std::numeric_limits<double>::quiet_NaN()).IsInfinite());
   CHECK(!Double(0.0).IsInfinite());
   CHECK(!Double(-0.0).IsInfinite());
   CHECK(!Double(1.0).IsInfinite());
@@ -229,3 +228,6 @@ TEST(NextDouble) {
   CHECK_EQ(V8_INFINITY,
            Double(V8_2PART_UINT64_C(0x7fefffff, ffffffff)).NextDouble());
 }
+
+}  // namespace internal
+}  // namespace v8

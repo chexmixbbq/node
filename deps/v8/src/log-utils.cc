@@ -2,10 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/v8.h"
-
 #include "src/log-utils.h"
+
+#include "src/assert-scope.h"
+#include "src/base/platform/platform.h"
+#include "src/objects-inl.h"
 #include "src/string-stream.h"
+#include "src/utils.h"
+#include "src/version.h"
 
 namespace v8 {
 namespace internal {
@@ -14,14 +18,11 @@ namespace internal {
 const char* const Log::kLogToTemporaryFile = "&";
 const char* const Log::kLogToConsole = "-";
 
-
 Log::Log(Logger* logger)
-  : is_stopped_(false),
-    output_handle_(NULL),
-    message_buffer_(NULL),
-    logger_(logger) {
-}
-
+    : is_stopped_(false),
+      output_handle_(NULL),
+      message_buffer_(NULL),
+      logger_(logger) {}
 
 void Log::Initialize(const char* log_file_name) {
   message_buffer_ = NewArray<char>(kMessageBufferSize);
@@ -33,7 +34,6 @@ void Log::Initialize(const char* log_file_name) {
     FLAG_log_gc = true;
     FLAG_log_suspect = true;
     FLAG_log_handles = true;
-    FLAG_log_regexp = true;
     FLAG_log_internal_timer_events = true;
   }
 
@@ -48,6 +48,21 @@ void Log::Initialize(const char* log_file_name) {
       OpenTemporaryFile();
     } else {
       OpenFile(log_file_name);
+    }
+
+    if (output_handle_ != nullptr) {
+      Log::MessageBuilder msg(this);
+      if (strlen(Version::GetEmbedder()) == 0) {
+        msg.Append("v8-version,%d,%d,%d,%d,%d", Version::GetMajor(),
+                   Version::GetMinor(), Version::GetBuild(),
+                   Version::GetPatch(), Version::IsCandidate());
+      } else {
+        msg.Append("v8-version,%d,%d,%d,%d,%s,%d", Version::GetMajor(),
+                   Version::GetMinor(), Version::GetBuild(),
+                   Version::GetPatch(), Version::GetEmbedder(),
+                   Version::IsCandidate());
+      }
+      msg.WriteToLogFile();
     }
   }
 }
@@ -69,7 +84,6 @@ void Log::OpenFile(const char* name) {
   DCHECK(!IsEnabled());
   output_handle_ = base::OS::FOpen(name, base::OS::LogFileOpenMode);
 }
-
 
 FILE* Log::Close() {
   FILE* result = NULL;
@@ -152,16 +166,14 @@ void Log::MessageBuilder::Append(String* str) {
   }
 }
 
-
 void Log::MessageBuilder::AppendAddress(Address addr) {
-  Append("0x%" V8PRIxPTR, addr);
+  Append("0x%" V8PRIxPTR, reinterpret_cast<intptr_t>(addr));
 }
-
 
 void Log::MessageBuilder::AppendSymbolName(Symbol* symbol) {
   DCHECK(symbol);
   Append("symbol(");
-  if (!symbol->name()->IsUndefined()) {
+  if (!symbol->name()->IsUndefined(symbol->GetIsolate())) {
     Append("\"");
     AppendDetailed(String::cast(symbol->name()), false);
     Append("\" ");
@@ -202,6 +214,41 @@ void Log::MessageBuilder::AppendDetailed(String* str, bool show_impl_info) {
   }
 }
 
+void Log::MessageBuilder::AppendUnbufferedHeapString(String* str) {
+  if (str == NULL) return;
+  DisallowHeapAllocation no_gc;  // Ensure string stay valid.
+  ScopedVector<char> buffer(16);
+  int len = str->length();
+  for (int i = 0; i < len; i++) {
+    uc32 c = str->Get(i);
+    if (c >= 32 && c <= 126) {
+      if (c == '\"') {
+        AppendUnbufferedCString("\"\"");
+      } else if (c == '\\') {
+        AppendUnbufferedCString("\\\\");
+      } else {
+        AppendUnbufferedChar(c);
+      }
+    } else if (c > 0xff) {
+      int length = v8::internal::SNPrintF(buffer, "\\u%04x", c);
+      DCHECK_EQ(6, length);
+      log_->WriteToFile(buffer.start(), length);
+    } else {
+      DCHECK(c <= 0xffff);
+      int length = v8::internal::SNPrintF(buffer, "\\x%02x", c);
+      DCHECK_EQ(4, length);
+      log_->WriteToFile(buffer.start(), length);
+    }
+  }
+}
+
+void Log::MessageBuilder::AppendUnbufferedChar(char c) {
+  log_->WriteToFile(&c, 1);
+}
+
+void Log::MessageBuilder::AppendUnbufferedCString(const char* str) {
+  log_->WriteToFile(str, static_cast<int>(strlen(str)));
+}
 
 void Log::MessageBuilder::AppendStringPart(const char* str, int len) {
   if (pos_ + len > Log::kMessageBufferSize) {
@@ -216,7 +263,6 @@ void Log::MessageBuilder::AppendStringPart(const char* str, int len) {
   DCHECK(pos_ <= Log::kMessageBufferSize);
 }
 
-
 void Log::MessageBuilder::WriteToLogFile() {
   DCHECK(pos_ <= Log::kMessageBufferSize);
   // Assert that we do not already have a new line at the end.
@@ -230,5 +276,5 @@ void Log::MessageBuilder::WriteToLogFile() {
   }
 }
 
-
-} }  // namespace v8::internal
+}  // namespace internal
+}  // namespace v8
